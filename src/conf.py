@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+import os
 from logging.handlers import RotatingFileHandler
 
 
@@ -20,13 +20,12 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-# Dataclass из библиотеки T-One для выходных данных
-@dataclass 
-class TextPhrase:
-    text: str
-    start_time: float
-    end_time: float
+def delete_file(file_path: str):
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        logger.info(f'file from: {file_path}. deleted correctly')
 
-
-def create_hash_id(input):
-    return hash(input)
+    else:
+        logger.warning(f'file path: {file_path}. doesn`t exist')
+        raise FileNotFoundError
+    

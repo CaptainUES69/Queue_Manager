@@ -1,72 +1,119 @@
+import pickle
+import shutil
+import uuid
 from os import getenv
+from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Response, status
-from pika import BlockingConnection, ConnectionParameters, PlainCredentials
-from pika.adapters import BlockingConnection
+from fastapi import BackgroundTasks, FastAPI, File, UploadFile, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from sqlalchemy.exc import NoResultFound
 
-from conf import logger
-from db_orm import create_task, get_task_data
+from src.conf import logger
+from src.consumer import audio_to_text, delete_task, url_to_text
+from src.db_orm import create_task_backup, delete_task_backup, get_task
 
 
 load_dotenv()
 app = FastAPI()
 
-conn_params = ConnectionParameters(
-    host = getenv('RABBIT_HOST'),
-    port = getenv('RABBIT_PORT'),
-    credentials = PlainCredentials(getenv('RABBIT_LOGIN'), getenv('RABBIT_PASSWORD'))
-)
+class Payload(BaseModel):
+    file_url: str
+    optional: str
 
 
-def publish(
-    data, 
-    queue_name: str = 'messages', 
-    routing_key: str = 'message'
-) -> None:
-    with BlockingConnection(conn_params) as conn:
-        with conn.channel() as ch:
-            ch.queue_declare(queue = queue_name)
-            ch.basic_publish(
-                exchange = '',
-                routing_key = routing_key,
-                body = f'{data}',
-            )
-            logger.info('Message delivered')
+@app.post(path = '/task/produce/url', tags = ['Produce new task'])
+async def produce_task_with_url(payload: Payload):
+    if not payload.file_url:
+        logger.warning(f'Url is empty')
+        return JSONResponse(
+            content = {
+                'Error':'Url is empty'
+                }, 
+            status_code = status.HTTP_400_BAD_REQUEST
+        )
+    
+    custom_id = str(uuid.uuid4())
+    create_task_backup(custom_id, file_url = payload.file_url, file_path = f'{getenv("FILES_PATH")}/{custom_id}')
+    url_to_text.apply_async(args = [payload.file_url, custom_id], task_id = custom_id)
+    
+    return JSONResponse(
+        content = {
+            'task_id': f'{custom_id}',
+            'status': 'queued'
+        }, 
+        status_code = status.HTTP_201_CREATED
+    )
 
 
-@app.post(path = '/task', tags = ['Produce new task'])
-async def produce_task(url: str):
+@app.post(path = '/task/produce/file', tags = ['Produce new task'])
+async def produce_task_with_file(file: UploadFile = File(...)):
+    upload_dir = Path('./src/files')
+    upload_dir.mkdir(exist_ok = True)\
+    
+    file_path = f'{upload_dir}/{file.filename}'
+    with open (file_path, 'wb') as file_upload:
+        shutil.copyfileobj(file.file, file_upload)
+
+    custom_id = str(uuid.uuid4())
+    create_task_backup(custom_id, file_path = file_path)
+    audio_to_text.apply_async(args = [file_path], task_id = custom_id)
+
+    return JSONResponse(
+        content = {
+            'task_id': f'{custom_id}',
+            'status': 'queued'
+        },
+        status_code = status.HTTP_201_CREATED
+    )
+
+
+@app.get(path = '/task/get', tags = ['Get data from task'])
+async def get_data_from_task(task_id: str, bg: BackgroundTasks):
+    if task_id == None:
+        return JSONResponse(
+            content = {
+                'message': 'task_id == None, please input task_id in url',
+                'status': None,
+                'result': None
+            },
+            status_code = status.HTTP_400_BAD_REQUEST
+        )
+
     try:
-        if not url:
-            logger.warning(f'Url is empty')
-            return Response(content = 'Url is empty', status_code = status.HTTP_400_BAD_REQUEST)
+        task = get_task(task_id)
+
+        if task.result != None:
+            bg.add_task(delete_task, task_id)
+            bg.add_task(delete_task_backup, task_id)
+
+            return JSONResponse(
+                content = {
+                    'message': f'Result from task {task_id}',
+                    'status': None,
+                    'result': pickle.loads(task.result)
+                },
+                status_code = status.HTTP_200_OK
+            )
         
-        publish(url)
-        create_task(url)
-        return Response(content = 'Task produced', status_code = status.HTTP_201_CREATED)
-
-    except Exception:
-        logger.critical('Critical error while producing_task', exc_info = True)
-
-
-@app.get(path = '/status/', tags = ['Get process status'])
-async def process_status(process_ID: int):
-    if not process_ID:
-        return Response(content = 'process_id = None', status_code = status.HTTP_400_BAD_REQUEST)
-        
-    data = get_task_data(process_ID)
-    if data[1] != None:
-        return Response(
+        return JSONResponse(
             content = {
-                'data': f'{data[1]}'
-            }, 
+                'message': f'Status of task {task_id}',
+                'status': task.status,
+                'result': None
+            },
             status_code = status.HTTP_200_OK
         )
 
-    return Response(
+    except NoResultFound:
+        return JSONResponse(
             content = {
-                'data': f'{data[0]}'
-            }, 
-            status_code = status.HTTP_200_OK
+                'message': f'Task with id: {task_id} not found',
+                'status': None,
+                'result': None
+            },
+            status_code = status.HTTP_404_NOT_FOUND
         )
+
+

@@ -1,0 +1,58 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=quest
+      - RABBITMQ_DEFAULT_PASS=quest
+    ports:
+      - "32:5672"
+      - "33:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+      
+  web:
+    image: queue
+    command: uvicorn src.webserver:app --host 0.0.0.0 --port 8000
+    volumes:
+      - .:/app
+      - db_data:/app
+    ports:
+      - "8000:8000"
+    environment:
+      RABBIT_HOST: rabbitmq
+      RABBIT_PORT: 5672
+      RABBIT_LOGIN: quest
+      RABBIT_PASSWORD: quest
+      RABBIT_VHOST: /
+      DBROOT: sqlite:///test.db
+      TASKS_NUMBER: 5
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery_worker:
+    image: queue
+    command: celery -A src.consumer worker --pool=prefork --loglevel=INFO 
+    volumes:
+      - .:/app
+      - db_data:/app
+    environment:
+      RABBIT_HOST: rabbitmq
+      RABBIT_PORT: 5672
+      RABBIT_LOGIN: quest
+      RABBIT_PASSWORD: quest
+      RABBIT_VHOST: /
+      DBROOT: sqlite:///test.db
+      TASKS_NUMBER: 5
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    
+volumes:
+  db_data:
