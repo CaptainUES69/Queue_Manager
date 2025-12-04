@@ -47,8 +47,8 @@ def url_to_text(file_url: str, id: str):
         file.write(req.content)
 
     audio = read_audio(path)
-    pipeline = StreamingCTCPipeline.from_hugging_face()
-    # pipeline = StreamingCTCPipeline.from_local(getenv('MODEL_PATH'))
+    # pipeline = StreamingCTCPipeline.from_hugging_face()
+    pipeline = StreamingCTCPipeline.from_local(getenv('MODEL_PATH'))
     phrases: list[TextPhrase] = pipeline.forward_offline(audio)
     text = []
     for phrase in phrases:
@@ -60,8 +60,8 @@ def url_to_text(file_url: str, id: str):
 @app.task(track_started = True)
 def audio_to_text(filepath: str):
     audio = read_audio(filepath)
-    pipeline = StreamingCTCPipeline.from_hugging_face()
-    # pipeline = StreamingCTCPipeline.from_local(getenv('MODEL_PATH'))
+    # pipeline = StreamingCTCPipeline.from_hugging_face()
+    pipeline = StreamingCTCPipeline.from_local(getenv('MODEL_PATH'))
     phrases: list[TextPhrase] = pipeline.forward_offline(audio)
     text = []
     for phrase in phrases:
