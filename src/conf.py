@@ -20,12 +20,5 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-def delete_file(file_path: str):
-    if os.path.exists(file_path):
-        os.remove(file_path)
-        logger.info(f'file from: {file_path}. deleted correctly')
-
-    else:
-        logger.warning(f'file path: {file_path}. doesn`t exist')
-        raise FileNotFoundError
-    
+# Разрешеные форматы данных
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
