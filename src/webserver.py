@@ -191,7 +191,7 @@ async def get_data_from_task(task_id: str, bg: BackgroundTasks) -> JSONResponse:
     try:
         task = get_task(task_id)
 
-        if task.result != None and task.status == 'SUCCESSED':
+        if task.result != None and task.status == 'SUCCESS':
             bg.add_task(delete_task, task_id)
             bg.add_task(delete_task_backup, task_id)
     
@@ -206,9 +206,10 @@ async def get_data_from_task(task_id: str, bg: BackgroundTasks) -> JSONResponse:
             )
         
         logger.info(f'Return status of task with id: {task_id}')
+        logger.debug(f'all data in task: \nstatus:{task.status} \nresult: {pickle.loads(task.result)}')
         return JSONResponse(
             content = {
-                'message': f'Status of task {task_id}',
+                'message': f'Status of task with id: {task_id}',
                 'status': task.status,
                 'result': None
             },

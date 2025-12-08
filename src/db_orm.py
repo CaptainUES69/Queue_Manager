@@ -63,7 +63,7 @@ def get_task(_id: str) -> CeleryTasks | None:
             raise NoResultFound
         
         task = session.query(CeleryTasks).filter(CeleryTasks.task_id == _id).first()
-        logger.info(f'Get celery task: {task=}')
+        logger.info(f'Get celery task: {task.task_id=}')
 
         return task
     
