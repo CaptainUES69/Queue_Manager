@@ -16,8 +16,8 @@ from src.db_orm import get_all_celery_tasks, get_all_files_url, get_task
 load_dotenv()
 app = Celery(
     'consumer',
-    # broker = f'amqp://{getenv('RABBIT_LOGIN')}:{getenv('RABBIT_PASSWORD')}@{getenv('RABBIT_HOST')}:{getenv('RABBIT_PORT')}/{getenv('RABBIT_VHOST')}',  # Адрес RabbitMQ
-    broker = 'amqp://myadmin:mypassword@127.0.0.1:5672//',
+    broker = f'amqp://{getenv('RABBIT_LOGIN')}:{getenv('RABBIT_PASSWORD')}@{getenv('RABBIT_HOST')}:{getenv('RABBIT_PORT')}/{getenv('RABBIT_VHOST')}',
+    # broker = 'amqp://myadmin:mypassword@127.0.0.1:5672//',
     backend = f'db+{getenv('DBROOT')}'
 )
 
