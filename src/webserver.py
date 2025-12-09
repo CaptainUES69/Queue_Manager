@@ -206,7 +206,6 @@ async def get_data_from_task(task_id: str, bg: BackgroundTasks) -> JSONResponse:
             )
         
         logger.info(f'Return status of task with id: {task_id}')
-        logger.debug(f'all data in task: \nstatus:{task.status} \nresult: {pickle.loads(task.result)}')
         return JSONResponse(
             content = {
                 'message': f'Status of task with id: {task_id}',

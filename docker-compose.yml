@@ -1,9 +1,9 @@
 services:
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:3-management-alpine
     environment:
-      - RABBITMQ_DEFAULT_USER=quest
-      - RABBITMQ_DEFAULT_PASS=quest
+      RABBITMQ_DEFAULT_USER: quest
+      RABBITMQ_DEFAULT_PASS: quest
     ports:
       - "32:5672"
       - "33:15672"
@@ -13,13 +13,14 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    restart: unless-stopped
       
   web:
     image: queue
     command: uvicorn src.webserver:app --host 0.0.0.0 --port 8000
     volumes:
-      - .:/app
-      - db_data:/app
+      - ./src:/app/src   
+      - sqlite_data:/app  
     ports:
       - "8000:8000"
     environment:
@@ -28,7 +29,7 @@ services:
       RABBIT_LOGIN: quest
       RABBIT_PASSWORD: quest
       RABBIT_VHOST: /
-      DBROOT: sqlite:///test.db
+      DBROOT: sqlite:////app/test.db
       TASKS_NUMBER: 5
     depends_on:
       rabbitmq:
@@ -37,17 +38,17 @@ services:
 
   celery_worker:
     image: queue
-    command: celery -A src.consumer worker --pool=prefork --loglevel=INFO 
+    command: celery -A src.consumer worker --pool=prefork --loglevel=INFO --concurrency=5
     volumes:
-      - .:/app
-      - db_data:/app
+      - ./src:/app/src 
+      - sqlite_data:/app 
     environment:
       RABBIT_HOST: rabbitmq
       RABBIT_PORT: 5672
       RABBIT_LOGIN: quest
       RABBIT_PASSWORD: quest
       RABBIT_VHOST: /
-      DBROOT: sqlite:///test.db
+      DBROOT: sqlite:////app/test.db
       TASKS_NUMBER: 5
     depends_on:
       rabbitmq:
@@ -55,4 +56,4 @@ services:
     restart: unless-stopped
     
 volumes:
-  db_data:
+  sqlite_data:
