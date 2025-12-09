@@ -29,14 +29,15 @@ class CeleryTasks(Base):
     retries: Mapped[int] = mapped_column(nullable = True)
     queue: Mapped[str] = mapped_column(String(155), nullable = True)
 
-class FilesAndURL(Base):
+class BackupData(Base):
     __tablename__ = 'files'
 
     ID: Mapped[int] = mapped_column(primary_key = True)
     task_id: Mapped[str] = mapped_column(String(155), unique = True, nullable = True)
     file_url: Mapped[str] = mapped_column(nullable = True)
     file_path: Mapped[str] = mapped_column(nullable = True)
-    
+    callback_url: Mapped[str] = mapped_column(nullable = True)
+
     
 engine = create_engine(
     getenv('DBROOT'), 
@@ -81,7 +82,7 @@ def get_all_celery_tasks() -> list[CeleryTasks]:
 
 
 def id_in_table_files(_id: str, session: Session) -> bool:
-    result = session.query(FilesAndURL).filter(FilesAndURL.task_id == _id).first()
+    result = session.query(BackupData).filter(BackupData.task_id == _id).first()
     if result:
         return True
     
@@ -89,11 +90,11 @@ def id_in_table_files(_id: str, session: Session) -> bool:
     return False
 
 
-def get_all_files_url() -> list[FilesAndURL]:
+def get_all_files_url() -> list[BackupData]:
     with session_factory() as session:
-        tasks = session.query(FilesAndURL).all()
+        tasks = session.query(BackupData).all()
         logger.info('Get all tasks from backup')
-        files: list[FilesAndURL] = []
+        files: list[BackupData] = []
         for task in tasks:
             logger.debug(f'Backup task_id = {task.task_id}')
             files.append(task)
@@ -101,13 +102,23 @@ def get_all_files_url() -> list[FilesAndURL]:
         return files
 
 
-def create_task_backup(_id: str, file_url: str = None, file_path: str = None) -> None:
+def create_task_backup(_id: str, 
+    file_url: str = None, 
+    file_path: str = None, 
+    callback_url: str = None
+) -> None:
     with session_factory() as session:
         if id_in_table_files(_id, session):
             logger.warning(f'ID: {_id} was already in backup table')
             raise IntegrityError
         
-        file = FilesAndURL(task_id = _id, file_url = file_url, file_path = file_path)
+        file = BackupData(
+            task_id = _id, 
+            file_url = file_url, 
+            file_path = file_path, 
+            callback_url = callback_url
+        )
+
         logger.debug(f'Backup task created: {file}')
         session.add(file)
         session.commit()
@@ -120,7 +131,7 @@ def delete_task_backup(_id: str) -> None:
             logger.warning(f'Task_id: {_id} was not found in backup')
             raise NoResultFound
         
-        file = session.query(FilesAndURL).filter(FilesAndURL.task_id == _id).first()
+        file = session.query(BackupData).filter(BackupData.task_id == _id).first()
         logger.debug(f'Backup task deleted {file=}')
         session.delete(file)
         session.commit()
