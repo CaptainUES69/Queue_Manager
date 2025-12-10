@@ -8,10 +8,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker,
 
 from src.conf import logger
 
-load_dotenv()
+load_dotenv(override = True)
 class Base(DeclarativeBase):
     pass
-
 
 class CeleryTasks(Base):
     __tablename__ = 'celery_taskmeta'
@@ -41,7 +40,7 @@ class BackupData(Base):
     
 engine = create_engine(
     getenv('DBROOT'), 
-    echo = False
+    echo = False # Для отладки
 )
 
 Base.metadata.create_all(engine)
@@ -51,9 +50,10 @@ session_factory = sessionmaker(engine)
 def id_in_table_celery(_id: str, session: Session) -> bool:
     result = session.query(CeleryTasks).filter(CeleryTasks.task_id == _id).first()
     if result:
+        logger.info(f'Hash_ID: {_id} found')
         return True
     
-    logger.warning(f'Hash_ID: {_id} not found')
+    logger.info(f'Hash_ID: {_id} not found')
     return False
     
 

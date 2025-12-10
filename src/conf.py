@@ -21,4 +21,4 @@ logger.addHandler(handler)
 
 
 # Разрешеные форматы данных
-ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac"}

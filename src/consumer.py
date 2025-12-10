@@ -13,7 +13,8 @@ from tone import StreamingCTCPipeline, TextPhrase, read_audio
 from src.conf import logger
 from src.db_orm import get_all_celery_tasks, get_all_files_url, get_task, delete_task_backup, NoResultFound
 
-load_dotenv()
+
+load_dotenv(override = True)
 app = Celery(
     'consumer',
     broker = f'amqp://{getenv('RABBIT_LOGIN')}:{getenv('RABBIT_PASSWORD')}@{getenv('RABBIT_HOST')}:{getenv('RABBIT_PORT')}/{getenv('RABBIT_VHOST')}',

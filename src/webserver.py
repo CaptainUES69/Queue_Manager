@@ -1,12 +1,10 @@
 import pickle
 import shutil
 import uuid
-from os import getenv
 from os.path import isfile, splitext
 from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -17,7 +15,6 @@ from src.consumer import audio_to_text, delete_task, url_to_text
 from src.db_orm import create_task_backup, delete_task_backup, get_task
 
 
-load_dotenv()
 app = FastAPI()
 
 
@@ -118,6 +115,7 @@ async def url_to_task(payload: Payload) -> JSONResponse:
             file_url = payload.file_url, 
             callback_url = payload.callback_url
         )
+        
     url_to_text.apply_async(args = [payload.file_url, custom_id, payload.callback_url], task_id = custom_id)
     logger.info(f'Task and backup created')
 
@@ -188,7 +186,7 @@ async def file_to_task(file: UploadFile = File(...), callback_url: Optional[str]
                 callback_url = callback_url
             )
 
-        audio_to_text.apply_async(args = [file_path, callback_url], task_id = custom_id)
+    audio_to_text.apply_async(args = [file_path, callback_url], task_id = custom_id)
     
     logger.info(f'Task and backup created')
 
