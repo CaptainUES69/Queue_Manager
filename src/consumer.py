@@ -103,8 +103,8 @@ def create_pipeline(self: Task, filepath: str) -> list[str]:
         raise Retry('Unknown exception')
 
 
-def return_data(self: Task, text: list[str], filepath: str, callback_url: str | None) -> list[str]:
-    if callback_url != None:
+def return_data(self: Task, text: list[str], filepath: str, callback_url: str) -> list[str]:
+    if callback_url:
         response = requests.post(
             callback_url,
             json = text 
@@ -123,7 +123,7 @@ def return_data(self: Task, text: list[str], filepath: str, callback_url: str | 
 
 
 @app.task(bind = True, track_started = True, max_retries = 3, default_retry_delay = 30)
-def url_to_text(self: Task, file_url: str, id: str, callback_url: str | None = None) -> list[str]:
+def url_to_text(self: Task, file_url: str, id: str, callback_url: str) -> list[str]:
     try:
         self.update_state(state = 'Downloading file')
         req = requests.get(file_url)
@@ -155,9 +155,8 @@ def url_to_text(self: Task, file_url: str, id: str, callback_url: str | None = N
 
 
 @app.task(bind = True, track_started = True, max_retries = 3, default_retry_delay = 30) 
-def audio_to_text(self: Task, filepath: str, callback_url: str | None = None) -> list[str]:
+def audio_to_text(self: Task, filepath: str, callback_url: str) -> list[str]:
     text = create_pipeline(self, filepath)
-
     return return_data(self, text, filepath, callback_url)
 
 
