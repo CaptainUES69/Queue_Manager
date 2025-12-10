@@ -21,6 +21,11 @@ app = Celery(
     backend = f'db+{getenv('DBROOT')}'
 )
 
+app.conf.update(
+    worker_concurrency = int(getenv('WORKERS_NUMBER')),
+    worker_prefetch_multiplier = int(getenv('TASKS_IN_WORKER'))
+)
+
 
 def delete_task(task_id: str) -> None:
     result = app.AsyncResult(task_id)
