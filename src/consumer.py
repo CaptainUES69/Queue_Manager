@@ -10,7 +10,7 @@ from miniaudio import DecodeError
 from requests.exceptions import HTTPError
 from tone import StreamingCTCPipeline, TextPhrase, read_audio
 
-from src.conf import logger
+from src.conf import logger, States
 from src.db_orm import get_all_celery_tasks, get_all_files_url, get_task, delete_task_backup, NoResultFound
 
 
@@ -43,47 +43,62 @@ def startup_tasks() -> None:
             logger.info(f'{backup.task_id} was already executed')
             continue
         
-        if backup.file_path != None:
-            if isfile(backup.file_path) == False:
-                logger.warning(f'file on {backup.file_path} doesn`t exist')
-                try:
-                    delete_task_backup(backup.task_id)
-                    continue
-
-                except NoResultFound:
-                    logger.critical('Strange backup row check table: files')
-                    continue
-
-            audio_to_text.apply_async(args = [backup.file_path, backup.callback_url], task_id = backup.task_id)
-            logger.info(f'{backup.file_path} was tasked with id: {backup.task_id}')
-        
-        elif backup.file_url != None:
-            url_to_text.apply_async(args = [backup.file_url, backup.task_id, backup.callback_url], task_id = backup.task_id)
-            logger.info(f'{backup.file_url} was tasked with id: {backup.task_id}')
-
-        else:
+        if (backup.file_url is None and backup.file_path is None):
             logger.warning(f'file_path and file_url was None in: {backup}')
+            
+        if isfile(backup.file_path) == False:
+            logger.warning(f'file on {backup.file_path} doesn`t exist')
+            try:
+                delete_task_backup(backup.task_id)
+                continue
+
+            except NoResultFound:
+                logger.critical('Strange backup row check table: files')
+                continue
+        
+        filepath = backup.file_url or backup.file_path
+
+        transcribation.apply_async(args = [filepath, backup.task_id, backup.callback_url], task_id = backup.task_id)
+        logger.info(f'{filepath} was tasked with id: {backup.task_id}')
 
 
-def create_pipeline(self: Task, filepath: str) -> list[str]:
+def download_file(self: Task, file_url: str, hash_id: str) -> str:
+    try:
+        self.update_state(state = States.DOWNLOAD)
+        req = requests.get(file_url)
+        req.raise_for_status()
+
+        filepath = f'{getenv("FILES_PATH")}/{hash_id}'
+        logger.debug(f'Get on url: {file_url}')
+        logger.debug(f'File_path: {filepath}')
+        
+        self.update_state(state = 'Writing file')
+        with open(filepath, "wb") as file:
+            file.write(req.content)
+
+    except HTTPError as e:
+        logger.critical(f'HTTPError with status code: {e.response.status_code}', exc_info = True)
+        self.update_state(state = f'{States.HTTP}: {e.response.status_code}')
+        raise Retry('Error while processing request')
+    
+    else:
+        return filepath
+
+
+def file_to_text(self: Task, filepath: str) -> list[str]:
     try:
         audio = read_audio(filepath)
         logger.info(f'Read audio from path: {filepath}')
-
-        # Ссылка на файлы моделей
-        if isfile(f'{getenv('MODEL_PATH')}/kenlm.bin') == False or isfile(f'{getenv('MODEL_PATH')}/model.onnx') == False: 
-            logger.critical('Models files doesn`t exists')
-            raise Retry('Models files doesn`t exists')
         
-        logger.info('Start creating pipeline')
-        self.update_state(state = 'Starting decode file')
+        logger.info('Start transcribing')
+        self.update_state(state = States.DECODING)
         pipeline = StreamingCTCPipeline.from_local(getenv('MODEL_PATH'))
         logger.info('Pipeline created succesfully')
         phrases: list[TextPhrase] = pipeline.forward_offline(audio)
         
         text: list[str] = []
         logger.info('Append list with phrases')
-        self.update_state(state = 'Creating result')
+        self.update_state(state = States.WRITE_RES)
         for phrase in phrases:
             text.append(phrase.text)
         
@@ -93,71 +108,47 @@ def create_pipeline(self: Task, filepath: str) -> list[str]:
         logger.critical(f'{filepath} doesn`t readable')
         if exists(filepath) and isfile(filepath):
             remove(filepath)
-        self.update_state(state = 'Decoding error')
+        self.update_state(state = States.DECODE_EXC)
         raise Reject('Decoding error')
     
     # Т.к. могут возникнуть разные ошибки во время транскрибации (чтобы не лезть в библиотеку и не высматривать всевозможные ошибки)
     except Exception:
         logger.critical('Unknown exception', exc_info = True)
-        self.update_state(state = 'Unknown internal error')
+        self.update_state(state = States.UNKNOWN)
         raise Retry('Unknown exception')
 
 
-def return_data(self: Task, text: list[str], filepath: str, callback_url: str) -> list[str]:
+def callback_to_url(self: Task, callback_url: str, result: list[str]) -> None:
     if callback_url:
         response = requests.post(
             callback_url,
-            json = text 
+            json = result 
         )
+
         try:
             response.raise_for_status()
-            self.update_state(state = 'Callback_url')
+            self.update_state(state = States.CALLBACK)
+            logger.info(f'Data was successfully return to: {callback_url}')
 
         except HTTPError as e:
             logger.warning(f'HTTPError with status code: {e.response.status_code}', exc_info = True)
-            self.update_state(state = f'HTTPError with status code: {e.response.status_code}')
-
-    if exists(filepath) and isfile(filepath):
-        remove(filepath)
-    return text
-
-
-@app.task(bind = True, track_started = True, max_retries = 3, default_retry_delay = 30)
-def url_to_text(self: Task, file_url: str, id: str, callback_url: str) -> list[str]:
-    try:
-        self.update_state(state = 'Downloading file')
-        req = requests.get(file_url)
-        req.raise_for_status()
-
-    except HTTPError as e:
-        logger.critical(f'HTTPError with status code: {e.response.status_code}', exc_info = True)
-        self.update_state(state = f'HTTPError with status code: {e.response.status_code}')
-        raise Retry('Error while processing request')
-    
-    try:
-        filepath = f'{getenv("FILES_PATH")}/{id}'
-        logger.debug(f'Get on url: {file_url}')
-        logger.debug(f'File_path: {filepath}')
-        
-        self.update_state(state = 'Writing file')
-        with open(filepath, "wb") as file:
-            file.write(req.content)
-
-        text = create_pipeline(self, filepath)
-        
-    except PermissionError:
-        logger.critical('Permission troubles check accesability')
-        self.update_state(state = 'Permission error')
-        raise Reject('Permission troubles check accesability')
-
-    else:
-        return return_data(self, text, filepath, callback_url)
+            self.update_state(state = f'{States.HTTP}: {e.response.status_code}')
 
 
 @app.task(bind = True, track_started = True, max_retries = 3, default_retry_delay = 30) 
-def audio_to_text(self: Task, filepath: str, callback_url: str) -> list[str]:
-    text = create_pipeline(self, filepath)
-    return return_data(self, text, filepath, callback_url)
+def transcribation(self: Task, filepath: str, hash_id: str, callback_url: str) -> list[str]:
+    if 'http' in filepath:
+        filepath = download_file(self, filepath, hash_id) 
+
+    result = file_to_text(self, filepath)
+    
+    if callback_url != '':
+        callback_to_url(self, callback_url, result)
+    
+    if exists(filepath) and isfile(filepath):
+        remove(filepath)
+
+    return result
 
 
 startup_tasks()
