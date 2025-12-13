@@ -23,14 +23,7 @@ services:
       - sqlite_data:/app  
     ports:
       - "8000:8000"
-    environment:
-      RABBIT_HOST: rabbitmq
-      RABBIT_PORT: 5672
-      RABBIT_LOGIN: quest
-      RABBIT_PASSWORD: quest
-      RABBIT_VHOST: /
-      DBROOT: sqlite:////app/test.db
-      TASKS_NUMBER: 5
+    env_file: '.env'
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -42,14 +35,7 @@ services:
     volumes:
       - ./src:/app/src 
       - sqlite_data:/app 
-    environment:
-      RABBIT_HOST: rabbitmq
-      RABBIT_PORT: 5672
-      RABBIT_LOGIN: quest
-      RABBIT_PASSWORD: quest
-      RABBIT_VHOST: /
-      DBROOT: sqlite:////app/test.db
-      TASKS_NUMBER: 5
+    env_file: '.env'
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -1,7 +1,6 @@
 import logging
-import os
 from logging.handlers import RotatingFileHandler
-
+from enum import Enum
 
 # Настройки логгирования
 logger = logging.getLogger("App")
@@ -20,5 +19,21 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
+# Для получения названия файла
+FILE_PATTERN = r'([^/\?#]+\.(?:mp3|flac|wav))(?:$|[\?#])'
+
 # Разрешеные форматы данных
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac"}
+
+class States(Enum):
+    DOWNLOAD: str = 'Download file from URL'
+    DECODING: str = 'Start decode file'
+    WRITE_RES: str = 'Writing result'
+    WRITING: str = 'Writing file'
+    CALLBACK: str = 'Result was callbacked'
+    SUCCESS: str = 'Task completed'
+    
+    DECODE_EXC: str = 'Decoding error'
+    HTTP: str = 'Http error with status code'
+    TIMEOUT: str = 'Connection Timeout error'
+    UNKNOWN: str = 'Unknown error while decoding'

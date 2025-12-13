@@ -1,3 +1,4 @@
+import re
 from os import getenv, remove
 from os.path import exists, isfile
 
@@ -7,11 +8,11 @@ from celery.app.task import Task
 from celery.exceptions import Reject, Retry
 from dotenv import load_dotenv
 from miniaudio import DecodeError
-from requests.exceptions import HTTPError
+from requests.exceptions import HTTPError, ConnectTimeout
 from tone import StreamingCTCPipeline, TextPhrase, read_audio
 
-from src.conf import logger, States
-from src.db_orm import get_all_celery_tasks, get_all_files_url, get_task, delete_task_backup, NoResultFound
+from src.conf import FILE_PATTERN, States, logger
+from src.db_orm import BackupData, CeleryTasks, TableManager
 
 
 load_dotenv(override = True)
@@ -35,90 +36,99 @@ def delete_task(task_id: str) -> None:
 
 
 def startup_tasks() -> None:
-    backups = get_all_files_url()
-    tasks = get_all_celery_tasks()
+    backups: list[BackupData] = TableManager.get_all_tasks(BackupData())
+    tasks: list[CeleryTasks] = TableManager.get_all_tasks(CeleryTasks())
 
     for backup in backups:
-        if backup.task_id in tasks and get_task(backup.task_id) == 'SUCCESS':
+        if backup.task_id in tasks and TableManager.get_task(backup.task_id, CeleryTasks()) == 'SUCCESS':
             logger.info(f'{backup.task_id} was already executed')
             continue
         
         if (backup.file_url is None and backup.file_path is None):
             logger.warning(f'file_path and file_url was None in: {backup}')
             
-        if isfile(backup.file_path) == False:
+        if not isfile(backup.file_path):
             logger.warning(f'file on {backup.file_path} doesn`t exist')
-            try:
-                delete_task_backup(backup.task_id)
-                continue
 
-            except NoResultFound:
+            if TableManager.delete_task_backup(backup.task_id):
+                continue
+        
+            else:
                 logger.critical('Strange backup row check table: files')
                 continue
         
         filepath = backup.file_url or backup.file_path
 
-        transcribation.apply_async(args = [filepath, backup.task_id, backup.callback_url], task_id = backup.task_id)
+        transcribation.apply_async(args = [filepath, backup.callback_url, backup.task_id], task_id = backup.task_id)
         logger.info(f'{filepath} was tasked with id: {backup.task_id}')
 
 
-def download_file(self: Task, file_url: str, hash_id: str) -> str:
+def download_file(self: Task, file_url: str, log_id: str = None) -> str:
     try:
-        self.update_state(state = States.DOWNLOAD)
+        self.update_state(state = States.DOWNLOAD.value)
+        logger.info(f'Try to GET data from url: {file_url} | {log_id}')
         req = requests.get(file_url)
         req.raise_for_status()
 
-        filepath = f'{getenv("FILES_PATH")}/{hash_id}'
-        logger.debug(f'Get on url: {file_url}')
-        logger.debug(f'File_path: {filepath}')
+        filename = re.search(FILE_PATTERN, file_url).group(1)
+        filepath = f'{getenv("FILES_PATH")}/{filename}'
         
         self.update_state(state = 'Writing file')
         with open(filepath, "wb") as file:
             file.write(req.content)
+        logger.info(f'File saved with name: {filename} | {log_id}')
 
     except HTTPError as e:
-        logger.critical(f'HTTPError with status code: {e.response.status_code}', exc_info = True)
-        self.update_state(state = f'{States.HTTP}: {e.response.status_code}')
+        logger.critical(f'HTTPError with status code: {e.response.status_code} | {log_id}', exc_info = True)
+        self.update_state(state = f'{States.HTTP.value}: {e.response.status_code}')
         raise Retry('Error while processing request')
     
     else:
         return filepath
 
 
-def file_to_text(self: Task, filepath: str) -> list[str]:
+def file_to_text(self: Task, filepath: str, log_id: str = None) -> list[str]:
     try:
         audio = read_audio(filepath)
-        logger.info(f'Read audio from path: {filepath}')
+        logger.info(f'Read audio from path: {filepath} | {log_id}')
         
-        logger.info('Start transcribing')
-        self.update_state(state = States.DECODING)
-        pipeline = StreamingCTCPipeline.from_local(getenv('MODEL_PATH'))
-        logger.info('Pipeline created succesfully')
+        logger.info(f'Start transcribing | {log_id}')
+        self.update_state(state = States.DECODING.value)
+
+        if int(getenv('USE_VPN')) == 0:
+            logger.info(f'Using local model | {log_id}')
+            pipeline = StreamingCTCPipeline.from_local(getenv('MODEL_PATH'))
+        
+        elif int(getenv('USE_VPN')) == 1:
+            logger.info(f'Using HuggingFace model | {log_id}')
+            pipeline = StreamingCTCPipeline.from_hugging_face()
+
+        logger.info(f'Pipeline created succesfully | {log_id}')
         phrases: list[TextPhrase] = pipeline.forward_offline(audio)
         
         text: list[str] = []
-        logger.info('Append list with phrases')
-        self.update_state(state = States.WRITE_RES)
+        logger.info(f'Append list with phrases | {log_id}')
+        self.update_state(state = States.WRITE_RES.value)
         for phrase in phrases:
             text.append(phrase.text)
         
         return text
     
     except DecodeError:
-        logger.critical(f'{filepath} doesn`t readable')
+        logger.critical(f'{filepath} doesn`t readable | {log_id}')
         if exists(filepath) and isfile(filepath):
             remove(filepath)
-        self.update_state(state = States.DECODE_EXC)
+        self.update_state(state = States.DECODE_EXC.value)
         raise Reject('Decoding error')
     
     # Т.к. могут возникнуть разные ошибки во время транскрибации (чтобы не лезть в библиотеку и не высматривать всевозможные ошибки)
     except Exception:
-        logger.critical('Unknown exception', exc_info = True)
-        self.update_state(state = States.UNKNOWN)
+        logger.critical(f'Unknown exception | {log_id}', exc_info = True)
+        self.update_state(state = States.UNKNOWN.value)
         raise Retry('Unknown exception')
 
 
-def callback_to_url(self: Task, callback_url: str, result: list[str]) -> None:
+def callback_to_url(self: Task, callback_url: str, result: list[str], log_id: str = None) -> None:
     if callback_url:
         response = requests.post(
             callback_url,
@@ -127,25 +137,31 @@ def callback_to_url(self: Task, callback_url: str, result: list[str]) -> None:
 
         try:
             response.raise_for_status()
-            self.update_state(state = States.CALLBACK)
-            logger.info(f'Data was successfully return to: {callback_url}')
+            logger.info(f'Response status: {response.status_code} | {log_id}')
+            self.update_state(state = States.CALLBACK.value)
+            logger.info(f'Data was successfully return to: {callback_url} | {log_id}')
 
         except HTTPError as e:
-            logger.warning(f'HTTPError with status code: {e.response.status_code}', exc_info = True)
-            self.update_state(state = f'{States.HTTP}: {e.response.status_code}')
+            logger.warning(f'HTTP Error with status code: {e.response.status_code} | {log_id}', exc_info = True)
+            self.update_state(state = f'{States.HTTP.value}: {e.response.status_code}')
+        
+        except ConnectTimeout:
+            logger.warning(f'Connection Timeout | {log_id}')
+            self.update_state(state = States.TIMEOUT.value)
 
 
 @app.task(bind = True, track_started = True, max_retries = 3, default_retry_delay = 30) 
-def transcribation(self: Task, filepath: str, hash_id: str, callback_url: str) -> list[str]:
+def transcribation(self: Task, filepath: str, callback_url: str, log_id: str = None) -> list[str]:
     if 'http' in filepath:
-        filepath = download_file(self, filepath, hash_id) 
+        filepath = download_file(self, filepath, log_id) 
 
-    result = file_to_text(self, filepath)
+    result = file_to_text(self, filepath, log_id)
     
     if callback_url != '':
-        callback_to_url(self, callback_url, result)
+        callback_to_url(self, callback_url, result, log_id)
     
     if exists(filepath) and isfile(filepath):
+        logger.info(f'Delete file after get result | {log_id}')
         remove(filepath)
 
     return result

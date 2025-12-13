@@ -3,10 +3,10 @@ from os import getenv
 
 from dotenv import load_dotenv
 from sqlalchemy import DateTime, LargeBinary, String, Text, create_engine
-from sqlalchemy.exc import IntegrityError, NoResultFound
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
-
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.exc import IntegrityError
 from src.conf import logger
+
 
 load_dotenv(override = True)
 class Base(DeclarativeBase):
@@ -32,9 +32,9 @@ class BackupData(Base):
     __tablename__ = 'files'
 
     ID: Mapped[int] = mapped_column(primary_key = True)
-    task_id: Mapped[str] = mapped_column(String(155), unique = True, nullable = True)
-    file_url: Mapped[str] = mapped_column(nullable = True)
-    file_path: Mapped[str] = mapped_column(nullable = True)
+    task_id: Mapped[str] = mapped_column(String(155), unique = True)
+    file_url: Mapped[str] = mapped_column(nullable = True, unique = True)
+    file_path: Mapped[str] = mapped_column(nullable = True, unique = True)
     callback_url: Mapped[str] = mapped_column(nullable = True)
 
     
@@ -47,92 +47,73 @@ Base.metadata.create_all(engine)
 session_factory = sessionmaker(engine)
 
 
-def id_in_table_celery(_id: str, session: Session) -> bool:
-    result = session.query(CeleryTasks).filter(CeleryTasks.task_id == _id).first()
-    if result:
-        logger.info(f'Hash_ID: {_id} found')
-        return True
-    
-    logger.info(f'Hash_ID: {_id} not found')
-    return False
-    
+class TableManager:
+    @classmethod
+    def get_task(cls, _id: str, table: CeleryTasks | BackupData) -> CeleryTasks | BackupData | None:
+        with session_factory() as session:
+            if isinstance(table, CeleryTasks):
+                task = session.query(CeleryTasks).filter(CeleryTasks.task_id == _id).first()
+                if not task: return None
 
-def get_task(_id: str) -> CeleryTasks | None:
-    with session_factory() as session:
-        if id_in_table_celery(_id, session) == False:
-            logger.warning(f'{_id} not found in table - tasks')
-            raise NoResultFound
-        
-        task = session.query(CeleryTasks).filter(CeleryTasks.task_id == _id).first()
-        logger.info(f'Get celery task: {task.task_id=}')
-
-        return task
+            else:
+                task = session.query(BackupData).filter(BackupData.task_id == _id).first()
+                if not task: return None
+            
+            logger.info(f'Get celery task: {task.task_id=}')
+            return task
     
 
-def get_all_celery_tasks() -> list[CeleryTasks]:
-    with session_factory() as session:
-        tasks = session.query(CeleryTasks).all()
-        logger.info('Get all tasks from celery')
-        filetasks: list[CeleryTasks] = []
-        for task in tasks:
-            logger.debug(f'Celery task_id = {task.task_id}')
-            filetasks.append(task)
+    @classmethod
+    def get_all_tasks(cls, table: CeleryTasks | BackupData) -> list[CeleryTasks] | list[BackupData] | None:
+        with session_factory() as session:
+            if isinstance(table, CeleryTasks):
+                tasks: list[CeleryTasks] = session.query(CeleryTasks).all()
+            
+            else:
+                tasks: list[BackupData] = session.query(BackupData).all()
+            
+            logger.info('Get all tasks')
+            return tasks
+
+
+    @classmethod
+    def create_task_backup(cls, _id: str, file_url: str = None, file_path: str = None, callback_url: str = None) -> str | None:
+        with session_factory() as session:
+            try:
+                file = BackupData(
+                    task_id = _id, 
+                    file_url = file_url, 
+                    file_path = file_path, 
+                    callback_url = callback_url
+                )
+
+                logger.debug(f'Backup task created: {file}')
+                session.add(file)
+                session.commit()
+                logger.info(f'Backup task {_id} created')
+            
+            except IntegrityError:
+                session.rollback()
+                logger.warning(f'Duplicate entry detected for URL/Path: {file_url or file_path}')
+
+                with session_factory() as new_session:
+                    if file_path:
+                        task = new_session.query(BackupData).filter(BackupData.file_path.contains(file_path)).first()
+
+                    elif file_url:
+                        task = new_session.query(BackupData).filter(BackupData.file_url.contains(file_url)).first()
+
+                    return task.task_id
+
+
+    @classmethod
+    def delete_task_backup(cls, _id: str) -> str | None:
+        with session_factory() as session:
+            file = session.query(BackupData).filter(BackupData.task_id == _id).first()
+            logger.debug(f'Backup task deleted {file=}')
+            session.delete(file)
+            session.commit()
+            logger.info(f'Backup task with id: {_id} deleted')
+
+            return _id
         
-        return tasks
-
-
-def id_in_table_files(_id: str, session: Session) -> bool:
-    result = session.query(BackupData).filter(BackupData.task_id == _id).first()
-    if result:
-        return True
-    
-    logger.warning(f'Hash_ID: {_id} not found')
-    return False
-
-
-def get_all_files_url() -> list[BackupData]:
-    with session_factory() as session:
-        tasks = session.query(BackupData).all()
-        logger.info('Get all tasks from backup')
-        files: list[BackupData] = []
-        for task in tasks:
-            logger.debug(f'Backup task_id = {task.task_id}')
-            files.append(task)
-        
-        return files
-
-
-def create_task_backup(_id: str, 
-    file_url: str = None, 
-    file_path: str = None, 
-    callback_url: str = None
-) -> None:
-    with session_factory() as session:
-        if id_in_table_files(_id, session):
-            logger.warning(f'ID: {_id} was already in backup table')
-            raise IntegrityError
-        
-        file = BackupData(
-            task_id = _id, 
-            file_url = file_url, 
-            file_path = file_path, 
-            callback_url = callback_url
-        )
-
-        logger.debug(f'Backup task created: {file}')
-        session.add(file)
-        session.commit()
-        logger.info(f'Backup task {_id} created')
-
-
-def delete_task_backup(_id: str) -> None:
-    with session_factory() as session:
-        if id_in_table_files(_id, session) == False:
-            logger.warning(f'Task_id: {_id} was not found in backup')
-            raise NoResultFound
-        
-        file = session.query(BackupData).filter(BackupData.task_id == _id).first()
-        logger.debug(f'Backup task deleted {file=}')
-        session.delete(file)
-        session.commit()
-        logger.info(f'Backup task: {_id} deleted')
