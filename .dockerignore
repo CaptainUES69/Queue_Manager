@@ -23,3 +23,4 @@ coverage.xml
 .DS_Store
 *.db
 files/*
+models/*

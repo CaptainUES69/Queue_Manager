@@ -19,21 +19,20 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-# Для получения названия файла
-FILE_PATTERN = r'([^/\?#]+\.(?:mp3|flac|wav))(?:$|[\?#])'
-
 # Разрешеные форматы данных
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac"}
 
-class States(Enum):
+class StatesAPI(Enum):
+    success: str = 'Success'
+    fail: str = 'Fail'
+    error: str = 'Error'
+    
+
+class StatesTasks(Enum):
     DOWNLOAD: str = 'Download file from URL'
     DECODING: str = 'Start decode file'
-    WRITE_RES: str = 'Writing result'
-    WRITING: str = 'Writing file'
     CALLBACK: str = 'Result was callbacked'
-    SUCCESS: str = 'Task completed'
+    SUCCESS: str = 'SUCCESS'
     
     DECODE_EXC: str = 'Decoding error'
-    HTTP: str = 'Http error with status code'
-    TIMEOUT: str = 'Connection Timeout error'
     UNKNOWN: str = 'Unknown error while decoding'

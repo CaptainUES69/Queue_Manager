@@ -5,134 +5,65 @@ from os.path import isfile, splitext
 from pathlib import Path
 from typing import Optional
 
+import requests
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, AnyHttpUrl
 
-from src.conf import ALLOWED_AUDIO_EXTENSIONS, logger
-from src.consumer import transcribation, delete_task
-from src.db_orm import TableManager, CeleryTasks
-
+from src.conf import ALLOWED_AUDIO_EXTENSIONS, StatesAPI, StatesTasks, logger
+from src.consumer import delete_task, transcribation
+from src.db_orm import CeleryTasks, TableManager
+from urllib.parse import unquote
 
 app = FastAPI()
 
 
 class ResponseID(BaseModel):
-    task_id: str
     status: str
+    data: str | list[str]
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    'task_id': 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-                    'status': 'QUEUED'
+                    'status': StatesAPI.success.value,
+                    'data': 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+                },
+                {
+                    'status': StatesAPI.success.value,
+                    'data': [
+                        ['text'], 
+                        ['from file']
+                    ]
                 }
             ]
         }
     }
 
-class ResponseResult(BaseModel):
+class ResponseError(BaseModel):
+    status: str
     message: str
-    status: str
-    result: list[str] | None
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    'message': 'Result from task wuth id: 123123123123',
-                    'status': 'SUCCESS',
-                    'result': ['some', 'example', 'text']
-                }
-            ]
-        }
-    }
-
-class Payload(BaseModel):
-    file_url: str
-    callback_url: Optional[str] = None
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    'file_url': 'http://download/link/file.mp3',
-                    'callback_url': 'http://return_data_here'
-                }
-            ]
-        }
-    }
-
-class Error(BaseModel):
-    error: str
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    'error': 'Something about trouble'
+                    'status': StatesAPI.error.value,
+                    'message': 'Something about trouble'
                 }
             ]
         }
     }
 
 
-@app.post(path = '/task/produce/url', 
-    tags = ['Produce new task'],
-    responses = {
-        200: {'model': ResponseID, 'description': 'Task created'},
-        400: {'model': Error, 'description': 'Trouble with input data (url or file type)'}
-    }
-)
-async def url_to_task(payload: Payload) -> JSONResponse:
-    if not any(ext in payload.file_url for ext in ALLOWED_AUDIO_EXTENSIONS):
-        logger.warning(f'File type not allowed')
-        return JSONResponse(
-            content = {
-                'Error': f'File type not allowed. Allowed types {ALLOWED_AUDIO_EXTENSIONS}'
-                }, 
-            status_code = status.HTTP_400_BAD_REQUEST
-        ) 
-    
-    custom_id = str(uuid.uuid4())
-    logger.debug(f'Created custom_id {custom_id}')
-
-    _id = TableManager.create_task_backup(custom_id, payload.file_url, callback_url = payload.callback_url)
-    if _id:
-        return JSONResponse(
-            content = {
-                'Error': f'URL already tasked with id {_id}'
-            },
-            status_code = status.HTTP_400_BAD_REQUEST
-        )
-        
-    transcribation.apply_async(args = [payload.file_url, payload.callback_url, custom_id], task_id = custom_id)
-    logger.info(f'Task: {custom_id} and backup with same id created')
-
-    return JSONResponse(
-        content = {
-            'task_id': custom_id,
-            'status': 'QUEUED'
-        }, 
-        status_code = status.HTTP_200_OK
-    )
-
-
-@app.post(path = '/task/produce/file', 
-    tags = ['Produce new task'],
-    responses = {
-        200: {'model': ResponseID, 'description': 'Task created'},
-        400: {'model': Error, 'description': 'Something about trouble'}
-    }
-)
-async def file_to_task(file: UploadFile = File(...), callback_url: Optional[str] = Form(None)) -> JSONResponse:
+def file_input(file: UploadFile, callback_url: str = None) -> JSONResponse:
     if splitext(file.filename)[1].lower() not in ALLOWED_AUDIO_EXTENSIONS:
         logger.warning('File type not allowed')
         return JSONResponse(
             content = {
-                'Error': f'File type not allowed. Allowed types {ALLOWED_AUDIO_EXTENSIONS}'
-                }, 
+                'status': StatesAPI.fail.value,
+                'message': f'File type not allowed, allowed types: {ALLOWED_AUDIO_EXTENSIONS}'
+            }, 
             status_code = status.HTTP_400_BAD_REQUEST
         )
 
@@ -146,7 +77,8 @@ async def file_to_task(file: UploadFile = File(...), callback_url: Optional[str]
     if _id:
         return JSONResponse(
             content = {
-                'Error': f'File already tasked with id {_id}'
+                'status': StatesAPI.fail.value,
+                'message': f'File already tasked with id: {_id}'
             },
             status_code = status.HTTP_400_BAD_REQUEST
         )
@@ -160,7 +92,8 @@ async def file_to_task(file: UploadFile = File(...), callback_url: Optional[str]
             logger.critical(f'Unable to save received file: {file_path} with task id: {custom_id}')
             return JSONResponse(
                 content = {
-                    'Error': f'Unable to save received file {file_path} with task id: {custom_id}'
+                    'status': StatesAPI.error.value,
+                    'message': f'Unable to save received file {file_path} with task id: {custom_id}'
                 },
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
             )
@@ -168,62 +101,135 @@ async def file_to_task(file: UploadFile = File(...), callback_url: Optional[str]
     transcribation.apply_async(args = [file_path, callback_url, custom_id], task_id = custom_id)
     logger.info(f'Task: {custom_id} and backup with same id created')
 
-    return JSONResponse(
-        content = {
-            'task_id': f'{custom_id}',
-            'status': 'QUEUED'
-        },
-        status_code = status.HTTP_200_OK
+    return ResponseID(
+        status = StatesAPI.success.value,
+        data = f'Task id: {custom_id}'
     )
+
+
+def url_input(file_url: str, callback_url: str = None) -> JSONResponse:
+    if not any(ext in file_url for ext in ALLOWED_AUDIO_EXTENSIONS):
+        logger.warning(f'File type not allowed')
+        return JSONResponse(
+            content = {
+                'status': StatesAPI.fail.value,
+                'message': f'File type in url not allowed, allowed types: {ALLOWED_AUDIO_EXTENSIONS}'
+            }, 
+            status_code = status.HTTP_400_BAD_REQUEST
+        ) 
+    
+    try:
+        response = requests.head(file_url)
+        response.raise_for_status()
+
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(
+            content = {
+                'status': StatesAPI.error.value,
+                'message': f'URL doesn`t response correctly. status code: {e.response.status_code}'
+            },
+            status_code = status.HTTP_400_BAD_REQUEST
+        )
+
+    custom_id = str(uuid.uuid4())
+    logger.debug(f'Created custom_id {custom_id}')
+
+    _id = TableManager.create_task_backup(custom_id, file_url, callback_url = callback_url)
+    if _id:
+        return JSONResponse(
+            content = {
+                'status': StatesAPI.fail.value,
+                'message': f'File already tasked with id: {_id}'
+            },
+            status_code = status.HTTP_400_BAD_REQUEST
+        )
+        
+    transcribation.apply_async(args = [file_url, callback_url, custom_id], task_id = custom_id)
+    logger.info(f'Task: {custom_id} and backup with same id created')
+
+    return ResponseID(
+        status = StatesAPI.success.value,
+        data = f'Task id: {custom_id}'
+    )
+
+
+@app.post(
+    path = '/task/produce',
+    tags = ['Produce new task'],
+    responses = {
+        status.HTTP_201_CREATED: {'model': ResponseID, 'description': 'Task created'},
+        status.HTTP_400_BAD_REQUEST: {'model': ResponseError, 'description': 'Something about trouble'}
+    },
+    status_code = status.HTTP_201_CREATED
+)
+async def data_to_task(
+    file: Optional[UploadFile] = File(
+        None,
+        description = "File to transcribe"
+    ), 
+    file_url: Optional[str] = Form(
+        None, 
+        examples = ['https://example.com/audio.mp3'],
+        description = 'File download URL'
+    ), 
+    callback_url: Optional[str] = Form(
+        None, 
+        examples = ["https://example.com/webhook"],
+        description = 'Return data URL'
+    )
+) -> ResponseID | ResponseError:    
+    if (not file and not file_url) or (file and file_url):
+        return JSONResponse(
+            content = {
+                'status': StatesAPI.error.value,
+                'message': 'Need to specify either the file or the URL'
+            },
+            status_code = status.HTTP_400_BAD_REQUEST
+        )
+    
+    if callback_url:
+        validated = AnyHttpUrl(callback_url) # Если не провалидирует то вернет ошибку 422
+        callback_url = unquote(callback_url)
+
+    if file:
+        return file_input(file, callback_url)
+
+    else:
+        validated = AnyHttpUrl(file_url) # Если не провалидирует то вернет ошибку 422
+        return url_input(unquote(file_url), callback_url)
 
 
 @app.get(path = '/task/get',
     tags = ['Get data from task'],
     responses = {
-        200: {'model': ResponseID, 'description': 'Return data from task'},
-        400: {'model': Error, 'description': 'Task_id not implemented'},
-        404: {'model': Error, 'description': 'Task doesn`t exists'}
+        status.HTTP_200_OK: {'model': ResponseID, 'description': 'Return data from task'},
+        status.HTTP_404_NOT_FOUND: {'model': ResponseError, 'description': 'Task doesn`t exists'}
     }
 )
-async def get_data_from_task(task_id: str, bg: BackgroundTasks) -> JSONResponse:
-    if task_id == None:
-        return JSONResponse(
-            content = {
-                'Error': 'Task_id not implemented'
-            },
-            status_code = status.HTTP_400_BAD_REQUEST
-        )
-
-    task = TableManager.get_task(task_id, CeleryTasks())
+async def get_data_from_task(task_id: str, bg: BackgroundTasks) -> ResponseID | ResponseError:
+    task = TableManager.get_task(task_id, CeleryTasks)
     if not task:
         logger.warning(f'Task with id: {task_id} was not found')
         return JSONResponse(
             content = {
-                'Error': f'Task with id: {task_id} not found'
+                'status': StatesAPI.error.value,
+                'message': f'Task with id: {task_id} was not found'
             },
             status_code = status.HTTP_404_NOT_FOUND
         )
 
-    if task.result and task.status == 'SUCCESS':
+    if task.status == StatesTasks.SUCCESS.value:
         bg.add_task(delete_task, task_id)
         bg.add_task(TableManager.delete_task_backup, task_id)
 
         logger.info(f'Return result of task with id: {task_id}')
-        return JSONResponse(
-            content = {
-                'message': f'Result from task {task_id}',
-                'status': task.status,
-                'result': pickle.loads(task.result)
-            },
-            status_code = status.HTTP_200_OK
+        return ResponseID(
+            status = StatesAPI.success.value, 
+            data = pickle.loads(task.result)
         )
     
     logger.info(f'Return status of task with id: {task_id}')
-    return JSONResponse(
-        content = {
-            'message': f'Status of task with id: {task_id}',
-            'status': task.status,
-            'result': None
-        },
-        status_code = status.HTTP_200_OK
-    )
+    return ResponseID(
+            status = StatesAPI.success.value, 
+            data = task.status
+        )

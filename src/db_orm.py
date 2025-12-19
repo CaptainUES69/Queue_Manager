@@ -1,6 +1,7 @@
 from datetime import datetime
 from os import getenv
 
+from typing import TypeVar, Type
 from dotenv import load_dotenv
 from sqlalchemy import DateTime, LargeBinary, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -45,34 +46,27 @@ engine = create_engine(
 
 Base.metadata.create_all(engine)
 session_factory = sessionmaker(engine)
+T = TypeVar('T', CeleryTasks, BackupData)
 
 
 class TableManager:
     @classmethod
-    def get_task(cls, _id: str, table: CeleryTasks | BackupData) -> CeleryTasks | BackupData | None:
+    def get_task(cls, _id: str, table: Type[T]) -> T | None:
         with session_factory() as session:
-            if isinstance(table, CeleryTasks):
-                task = session.query(CeleryTasks).filter(CeleryTasks.task_id == _id).first()
-                if not task: return None
-
-            else:
-                task = session.query(BackupData).filter(BackupData.task_id == _id).first()
-                if not task: return None
-            
-            logger.info(f'Get celery task: {task.task_id=}')
-            return task
+            task = session.query(table).filter(table.task_id == _id).first()
+            if not task:
+                return None
+        
+        logger.info(f'Get task {type(table)} with task id: {task.task_id=}')
+        return task
     
 
     @classmethod
-    def get_all_tasks(cls, table: CeleryTasks | BackupData) -> list[CeleryTasks] | list[BackupData] | None:
+    def get_all_tasks(cls, table: Type[T]) -> list[T] | None:
         with session_factory() as session:
-            if isinstance(table, CeleryTasks):
-                tasks: list[CeleryTasks] = session.query(CeleryTasks).all()
+            tasks = session.query(table).all()
             
-            else:
-                tasks: list[BackupData] = session.query(BackupData).all()
-            
-            logger.info('Get all tasks')
+            logger.info(f'Get all tasks for: {type(table)}')
             return tasks
 
 
