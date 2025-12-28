@@ -31,7 +31,7 @@ services:
   
   celery_worker:
     image: queue
-    command: celery -A src.consumer worker --pool=solo --loglevel=INFO
+    command: celery -A src.tasks worker --pool=solo --loglevel=INFO
     volumes:
       - ./models:/app/models
       - sqlite_data:/app

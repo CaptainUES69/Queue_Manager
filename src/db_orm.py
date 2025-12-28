@@ -29,7 +29,7 @@ class CeleryTasks(Base):
     retries: Mapped[int] = mapped_column(nullable = True)
     queue: Mapped[str] = mapped_column(String(155), nullable = True)
 
-class BackupData(Base):
+class BackupTasks(Base):
     __tablename__ = 'files'
 
     ID: Mapped[int] = mapped_column(primary_key = True)
@@ -46,7 +46,7 @@ engine = create_engine(
 
 Base.metadata.create_all(engine)
 session_factory = sessionmaker(engine)
-T = TypeVar('T', CeleryTasks, BackupData)
+T = TypeVar('T', CeleryTasks, BackupTasks)
 
 
 class TableManager:
@@ -74,7 +74,7 @@ class TableManager:
     def create_task_backup(cls, _id: str, file_url: str = None, file_path: str = None, callback_url: str = None) -> str | None:
         with session_factory() as session:
             try:
-                file = BackupData(
+                file = BackupTasks(
                     task_id = _id, 
                     file_url = file_url, 
                     file_path = file_path, 
@@ -92,10 +92,10 @@ class TableManager:
 
                 with session_factory() as new_session:
                     if file_path:
-                        task = new_session.query(BackupData).filter(BackupData.file_path.contains(file_path)).first()
+                        task = new_session.query(BackupTasks).filter(BackupTasks.file_path.contains(file_path)).first()
 
                     elif file_url:
-                        task = new_session.query(BackupData).filter(BackupData.file_url.contains(file_url)).first()
+                        task = new_session.query(BackupTasks).filter(BackupTasks.file_url.contains(file_url)).first()
 
                     return task.task_id
 
@@ -103,7 +103,7 @@ class TableManager:
     @classmethod
     def delete_task_backup(cls, _id: str) -> str | None:
         with session_factory() as session:
-            file = session.query(BackupData).filter(BackupData.task_id == _id).first()
+            file = session.query(BackupTasks).filter(BackupTasks.task_id == _id).first()
             logger.debug(f'Backup task deleted {file=}')
             session.delete(file)
             session.commit()
