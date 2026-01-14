@@ -4,16 +4,16 @@ import uuid
 from os.path import isfile, splitext
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, AnyHttpUrl
+from pydantic import AnyHttpUrl, BaseModel
 
 from src.conf import ALLOWED_AUDIO_EXTENSIONS, StatesAPI, StatesTasks, logger
-from src.tasks import delete_task, transcribation_task
 from src.db_orm import CeleryTasks, TableManager
-from urllib.parse import unquote
+from src.tasks import delete_task, transcribation_task
 
 app = FastAPI()
 
@@ -57,7 +57,7 @@ class ResponseError(BaseModel):
 
 
 def audio_file_input(file: UploadFile, callback_url: str = None) -> JSONResponse:
-    if splitext(file.filename)[1].lower() not in ALLOWED_AUDIO_EXTENSIONS:
+    if splitext(file.filename)[1] not in ALLOWED_AUDIO_EXTENSIONS:
         logger.warning('File type not allowed')
         return JSONResponse(
             content = {
@@ -80,7 +80,7 @@ def audio_file_input(file: UploadFile, callback_url: str = None) -> JSONResponse
                 'status': StatesAPI.fail.value,
                 'message': f'File already tasked with id: {_id}'
             },
-            status_code = status.HTTP_400_BAD_REQUEST
+            status_code = status.HTTP_409_CONFLICT
         )
     
     else:
@@ -129,7 +129,7 @@ def audio_url_input(file_url: str, callback_url: str = None) -> JSONResponse:
                     'status': StatesAPI.error.value,
                     'message': f'URL doesn`t response correctly. status code: {e.response.status_code}'
                 },
-                status_code = status.HTTP_400_BAD_REQUEST
+                status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
             )
         
         return JSONResponse(
@@ -137,7 +137,7 @@ def audio_url_input(file_url: str, callback_url: str = None) -> JSONResponse:
                 'status': StatesAPI.error.value,
                 'message': f'URL doesn`t response correctly. status code doesn`t exists'
             },
-            status_code = status.HTTP_400_BAD_REQUEST
+            status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
         )
 
     custom_id = str(uuid.uuid4())
@@ -150,7 +150,7 @@ def audio_url_input(file_url: str, callback_url: str = None) -> JSONResponse:
                 'status': StatesAPI.fail.value,
                 'message': f'File already tasked with id: {_id}'
             },
-            status_code = status.HTTP_400_BAD_REQUEST
+            status_code = status.HTTP_409_CONFLICT
         )
         
     transcribation_task.apply_async(args = [file_url, callback_url, custom_id], task_id = custom_id)
@@ -162,8 +162,7 @@ def audio_url_input(file_url: str, callback_url: str = None) -> JSONResponse:
     )
 
 
-@app.post(
-    path = '/transcribe_audio/create',
+@app.post(path = '/transcribe_audio/create',
     tags = ['Produce new task'],
     responses = {
         status.HTTP_201_CREATED: {'model': ResponseData, 'description': 'Task created'},
@@ -239,6 +238,6 @@ async def get_data_from_task(task_id: str, bg: BackgroundTasks) -> ResponseData 
     
     logger.info(f'Return status of task with id: {task_id}')
     return ResponseData(
-            status = StatesAPI.success.value, 
-            data = task.status
-        )
+        status = StatesAPI.success.value, 
+        data = task.status
+    )

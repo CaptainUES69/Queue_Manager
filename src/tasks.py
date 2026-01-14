@@ -174,7 +174,7 @@ def transcribation_task(self: Task, audio_location: str, callback_url: str, log_
     return result
 
 
-@after_setup_task_logger.connect
+@after_setup_task_logger.connect()
 def init_pipeline_and_tasks(sender = None, **kwargs):
     logger.info('Startup')
     global pipeline
