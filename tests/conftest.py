@@ -16,64 +16,57 @@ from src.webserver import app
 
 backups = [
     BackupTasks(
-        task_id = str(uuid.uuid4()), 
-        file_url = 'https://raw.githubusercontent.com/CaptainUES69/test/refs/heads/main/test_andrei.flac', 
+        task_id=str(uuid.uuid4()),
+        file_url="https://raw.githubusercontent.com/CaptainUES69/test/refs/heads/main/test_andrei.flac",
     ),
     BackupTasks(
-        task_id = str(uuid.uuid4()), 
-        file_path = 'src\\files/test.flac',
+        task_id=str(uuid.uuid4()),
+        file_path="src\\files/test.flac",
     ),
     BackupTasks(
-        task_id = str(uuid.uuid4()), 
-        file_url = 'https://raw.githubusercontent.com/CaptainUES69/test/refs/heads/main/test.mp3', 
-        file_path = 'src\\files/test.mp3',
+        task_id=str(uuid.uuid4()),
+        file_url="https://raw.githubusercontent.com/CaptainUES69/test/refs/heads/main/test.mp3",
+        file_path="src\\files/test.mp3",
     ),
     BackupTasks(
-        task_id = str(uuid.uuid4()), 
-        file_url = 'https://raw.githubusercontent.com/CaptainUES69/test/refs/heads/main/test.flac', 
-        callback_url = 'https://example.com'
+        task_id=str(uuid.uuid4()),
+        file_url="https://raw.githubusercontent.com/CaptainUES69/test/refs/heads/main/test.flac",
+        callback_url="https://example.com",
     ),
     BackupTasks(
-        task_id = str(uuid.uuid4()), 
-        file_path = 'src\\files/test.wav',
-        callback_url = 'https://example.com'
-    )
+        task_id=str(uuid.uuid4()),
+        file_path="src\\files/test.wav",
+        callback_url="https://example.com",
+    ),
 ]
 celerys = [
+    CeleryTasks(task_id=str(uuid.uuid4()), status=StatesTasks.decode_exc.value),
     CeleryTasks(
-        task_id = str(uuid.uuid4()), 
-        status = StatesTasks.DECODE_EXC.value
+        task_id=str(uuid.uuid4()),
+        status=StatesTasks.success.value,
+        result=pickle.dumps("123123frasdasD23ASD"),
     ),
-    CeleryTasks(
-        task_id = str(uuid.uuid4()), 
-        status = StatesTasks.SUCCESS.value,
-        result = pickle.dumps(
-            '123123frasdasD23ASD'
-        )
-    ),
-    CeleryTasks(
-        task_id = str(uuid.uuid4()), 
-        status = StatesTasks.DOWNLOAD.value
-    )
+    CeleryTasks(task_id=str(uuid.uuid4()), status=StatesTasks.download.value),
 ]
 
-@pytest.fixture(scope = 'session')
+
+@pytest.fixture(scope="session")
 def engine() -> Engine:
     engine = create_engine(
         "sqlite:///:memory:",
-        connect_args = {"check_same_thread": False},
-        poolclass = StaticPool,
-        echo = False
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        echo=False,
     )
 
     return engine
 
 
-@pytest.fixture(scope = 'session')
+@pytest.fixture(scope="session")
 def create_tables(engine: Engine) -> Generator[None, Any, None]:
-    Base.metadata.create_all(bind = engine)
+    Base.metadata.create_all(bind=engine)
     connection = engine.connect()
-    session_factory = sessionmaker(bind = connection)
+    session_factory = sessionmaker(bind=connection)
     session = session_factory()
 
     session.add_all(backups)
@@ -84,94 +77,127 @@ def create_tables(engine: Engine) -> Generator[None, Any, None]:
 
     yield
 
-    Base.metadata.drop_all(bind = engine)
+    Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture(scope = 'session')
-def session_maker(engine: Engine, create_tables: None) -> Generator[sessionmaker[Session], None, None]:
+@pytest.fixture(scope="class")
+def session_maker(
+    engine: Engine, create_tables: None
+) -> Generator[sessionmaker[Session], None, None]:
     session_factory: sessionmaker[Session] = sessionmaker(engine)
 
     yield session_factory
 
 
-@pytest.fixture(scope = 'function')
+@pytest.fixture(scope="class")
 def conf_TB(session_maker) -> None:
     TableManager.session_factory = session_maker
 
 
-@pytest.fixture(scope = 'session')
+@pytest.fixture(scope="class")
 def testclient() -> TestClient:
-    return TestClient(app)   
+    return TestClient(app)
 
 
-@pytest.fixture(scope = 'function')
-def mock_TableManager() -> Generator[MagicMock | AsyncMock, Any, None]:
-    with patch('src.webserver.TableManager') as mock:
+@pytest.fixture(scope="function")
+def mock_webserver_TableManager() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.TableManager") as mock:
         yield mock
 
 
-@pytest.fixture(scope = 'function')
-def mock_delete_task_backup() -> Generator[MagicMock | AsyncMock, Any, None]:
-    with patch('src.webserver.TableManager.delete_task_backup') as mock:
+@pytest.fixture(scope="function")
+def mock_tasks_TableManager() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.tasks.TableManager") as mock:
         yield mock
 
 
-@pytest.fixture(scope = 'function')
-def mock_transcribation_task() -> Generator[MagicMock | AsyncMock, Any, None]:
-    with patch('src.webserver.transcribation_task') as mock:
-        mock.apply_async = MagicMock(return_value = MagicMock(id = 'test-task-id'))
+@pytest.fixture(scope="function")
+def mock_webserver_delete_task_backup() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.TableManager.delete_task_backup") as mock:
         yield mock
 
 
-@pytest.fixture(scope = 'function')
-def mock_requests() -> Generator[MagicMock | AsyncMock, Any, None]:
-    with patch('src.webserver.requests') as mock:
+@pytest.fixture(scope="function")
+def mock_webserver_transcribation_task() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.transcribation_task") as mock:
+        mock.apply_async = MagicMock(return_value=MagicMock(id=str(uuid.uuid4())))
         yield mock
 
 
-@pytest.fixture(scope = 'function')
-def mock_shutil() -> Generator[MagicMock | AsyncMock, Any, None]:
-    with patch('src.webserver.shutil') as mock:
+@pytest.fixture(scope="function")
+def mock_tasks_transcribation_task() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.tasks.transcribation_task") as mock:
+        mock.apply_async = MagicMock(return_value=MagicMock(id=str(uuid.uuid4())))
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_webserver_requests() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.requests") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_webserver_shutil() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.shutil") as mock:
         mock.copyfileobj = Mock()
         yield mock
 
 
-@pytest.fixture(scope = 'function')
-def mock_open_file():
-    with patch('src.webserver.open', mock_open()) as mock_file:
-        yield mock_file
+@pytest.fixture(scope="function")
+def mock_webserver_open_file() -> Generator[Any, Any, None]:
+    with patch("src.webserver.open", mock_open()) as mock:
+        yield mock
 
 
-@pytest.fixture(scope = 'function')
-def mock_pathlib() -> Generator[MagicMock | AsyncMock, Any, None]:
-    with patch('src.webserver.Path') as mock:
+@pytest.fixture(scope="function")
+def mock_webserver_pathlib() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.Path") as mock:
         mock_instance = Mock()
         mock_instance.mkdir = Mock()
         mock.return_value = mock_instance
         yield mock
 
 
-@pytest.fixture(scope = 'function')
-def mock_os_path() -> Generator[MagicMock | AsyncMock, Any, None]:
-    with patch('src.webserver.isfile') as mock:
+@pytest.fixture(scope="function")
+def mock_webserver_os_path() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.isfile") as mock:
         yield mock
 
 
-@pytest.fixture(scope='function')
-def audio_file_factory():
-    def _create_audio_file(filename = "test.mp3", content = None, mime_type = "audio/mpeg"):
+@pytest.fixture(scope="function")
+def mock_tasks_os_path() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.tasks.isfile") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def audio_file_factory() -> tuple[str, io.BytesIO, str]:
+    def _create_audio_file(filename="test.mp3", content=None, mime_type="audio/mpeg"):
         if content is None:
             content = b"fake audio content" * 100
-    
+
         file_like_object = io.BytesIO(content)
         return (filename, file_like_object, mime_type)
-    
+
     return _create_audio_file
 
 
-
-@pytest.fixture(scope = 'function')
-def mock_delete_task():
-    with patch('src.tasks.delete_task') as mock:
+@pytest.fixture(scope="function")
+def mock_webserver_delete_task() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.webserver.delete_task") as mock:
         yield mock
 
+
+@pytest.fixture(scope="function")
+def mock_task_self() -> Mock:
+    mock = Mock()
+    mock.update_state = Mock()
+    return mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_celery_app() -> Generator[MagicMock | AsyncMock, Any, None]:
+    with patch("src.tasks.app") as mock:
+        mock.AsyncResult = Mock()
+        yield mock
