@@ -61,7 +61,7 @@ class TableManager:
             if not task:
                 return None
 
-        logger.info(f"Get task {type(table)} with task id: {task.task_id=}")
+        logger.info(f"Get task {table.__name__} with task id: {task.task_id=}")
         return task
 
     @classmethod
@@ -69,7 +69,7 @@ class TableManager:
         with cls.session_factory() as session:
             tasks = session.query(table).all()
 
-            logger.info(f"Get all tasks for: {type(table)}")
+            logger.info(f"Get all tasks for: {table.__name__}")
             return tasks
 
     @classmethod

@@ -15,7 +15,6 @@ from tone import StreamingCTCPipeline, TextPhrase, read_audio
 from src.conf import StatesTasks, logger
 from src.db_orm import BackupTasks, CeleryTasks, TableManager
 
-
 load_dotenv(override=True)
 app = Celery(
     "tasks",
@@ -52,12 +51,13 @@ def create_pipeline() -> StreamingCTCPipeline:
 def load_backups() -> list[str]:
     backups: list[BackupTasks] = TableManager.get_all_tasks(BackupTasks)
     tasks: list[CeleryTasks] = TableManager.get_all_tasks(CeleryTasks)
+    task_statuses = {task.task_id: task.status for task in tasks}
     loaded: list[str] = []
 
     for backup in backups:
         if (
-            backup.task_id in tasks
-            and TableManager.get_task(backup.task_id, CeleryTasks()) == "SUCCESS"
+            backup.task_id in task_statuses 
+            and task_statuses[backup.task_id] == StatesTasks.success.value
         ):
             logger.info(f"{backup.task_id} was already executed")
             continue
@@ -77,7 +77,7 @@ def load_backups() -> list[str]:
 
         filepath = backup.file_url or backup.file_path
 
-        transcribation_task.apply_async(
+        trancribe.apply_async(
             args=[filepath, backup.callback_url, backup.task_id], task_id=backup.task_id
         )
         logger.info(f"{filepath} was tasked with id: {backup.task_id}")
@@ -177,7 +177,7 @@ def callback_result_to_url(
 
 
 @app.task(bind=True, track_started=True, max_retries=3, default_retry_delay=30)
-def transcribation_task(
+def trancribe(
     self: Task, audio_location: str, callback_url: str, log_id: str = None
 ) -> list[str]:
     if "://" in audio_location:  # т.к. в названии файла символов быть не может
@@ -206,3 +206,4 @@ def init_pipeline_and_tasks(sender=None, **kwargs):
 
     logger.info("Startup backup tasks")
     load_backups()
+    

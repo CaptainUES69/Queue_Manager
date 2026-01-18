@@ -13,7 +13,7 @@ from pydantic import AnyHttpUrl, BaseModel
 
 from src.conf import ALLOWED_AUDIO_EXTENSIONS, StatesAPI, StatesTasks, logger
 from src.db_orm import CeleryTasks, TableManager
-from src.tasks import delete_task, transcribation_task
+from src.tasks import delete_task, trancribe
 
 app = FastAPI()
 
@@ -94,7 +94,7 @@ def audio_file_input(file: UploadFile, callback_url: str = None) -> JSONResponse
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    transcribation_task.apply_async(
+    trancribe.apply_async(
         args=[file_path, callback_url, custom_id], task_id=custom_id
     )
     logger.info(f"Task: {custom_id} and backup with same id created")
@@ -150,7 +150,7 @@ def audio_url_input(file_url: str, callback_url: str = None) -> JSONResponse:
             status_code=status.HTTP_409_CONFLICT,
         )
 
-    transcribation_task.apply_async(
+    trancribe.apply_async(
         args=[file_url, callback_url, custom_id], task_id=custom_id
     )
     logger.info(f"Task: {custom_id} and backup with same id created")
@@ -170,7 +170,7 @@ def audio_url_input(file_url: str, callback_url: str = None) -> JSONResponse:
     },
     status_code=status.HTTP_201_CREATED,
 )
-async def transcribation_task(
+async def trancribe_audio(
     audio_file: Optional[UploadFile] = File(None, description="File to transcribe"),
     audio_url: Optional[str] = Form(
         None,

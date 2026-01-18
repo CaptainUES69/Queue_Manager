@@ -1,7 +1,7 @@
 import io
 import pickle
 import uuid
-from typing import Any, Generator
+from typing import Any, Generator, Callable
 from unittest.mock import AsyncMock, MagicMock, Mock, mock_open, patch
 
 import pytest
@@ -201,3 +201,137 @@ def mock_tasks_celery_app() -> Generator[MagicMock | AsyncMock, Any, None]:
     with patch("src.tasks.app") as mock:
         mock.AsyncResult = Mock()
         yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_getenv() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.getenv") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_streaming_pipeline() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.StreamingCTCPipeline") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_read_audio() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.read_audio") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_remove() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.remove") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_exists() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.exists") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_basename() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.basename") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_urlparse() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.urlparse") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_requests() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.requests") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_open_file() -> Generator[Any, Any, None]:
+    with patch("src.tasks.open", mock_open()) as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_app() -> Generator[MagicMock, Any, None]:
+    with patch("src.tasks.app") as mock:
+        yield mock
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_pipeline_global() -> Generator[MagicMock, Any, None]:
+    import src.tasks as tasks_module
+
+    original_pipeline = tasks_module.pipeline
+    mock_pipeline = MagicMock()
+    tasks_module.pipeline = mock_pipeline
+
+    yield mock_pipeline
+
+    # Восстанавливаем оригинальный pipeline
+    tasks_module.pipeline = original_pipeline
+
+
+@pytest.fixture(scope="function")
+def mock_tasks_pipeline_instance() -> MagicMock:
+    mock = MagicMock()
+    mock.forward_offline = MagicMock(return_value=[])
+    return mock
+
+
+@pytest.fixture(scope="function")
+def mock_text_phrase() -> MagicMock:
+    mock = MagicMock()
+    mock.text = "test phrase"
+    return mock
+
+
+@pytest.fixture(scope="function")
+def mock_celery_task_result() -> MagicMock:
+    mock = MagicMock()
+    mock.forget = MagicMock()
+    return mock
+
+
+@pytest.fixture(scope="function")
+def backup_task_factory() -> Callable[..., BackupTasks]:
+    def _create_backup_task(
+        task_id: str = None,
+        file_url: str = None,
+        file_path: str = None,
+        callback_url: str = None,
+    ) -> BackupTasks:
+        return BackupTasks(
+            task_id=task_id or str(uuid.uuid4()),
+            file_url=file_url,
+            file_path=file_path,
+            callback_url=callback_url,
+        )
+
+    return _create_backup_task
+
+
+@pytest.fixture(scope="function")
+def celery_task_factory() -> Callable[..., CeleryTasks]:
+    def _create_celery_task(
+        task_id: str = None, status: str = None, result: bytes = None
+    ) -> CeleryTasks:
+        return CeleryTasks(
+            task_id=task_id or str(uuid.uuid4()),
+            status=status or StatesTasks.download.value,
+            result=result,
+        )
+
+    return _create_celery_task
+
+
+@pytest.fixture(scope="function")
+def mock_self_task() -> MagicMock:
+    mock = MagicMock()
+    mock.update_state = MagicMock()
+    return mock

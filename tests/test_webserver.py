@@ -58,7 +58,7 @@ class TestTranscribationTask:
 
         # act
         response: Response = testclient.post(
-            "/transcribe_audio/create", data=data, files=files
+            "/transcribation_task/create", data=data, files=files
         )
 
         # assert
@@ -76,7 +76,7 @@ class TestTranscribationTask:
 
         # act
         response: Response = testclient.post(
-            "/transcribe_audio/create", data=data, files=files
+            "/transcribation_task/create", data=data, files=files
         )
 
         # assert
