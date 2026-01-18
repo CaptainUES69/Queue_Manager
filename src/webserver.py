@@ -94,9 +94,7 @@ def audio_file_input(file: UploadFile, callback_url: str = None) -> JSONResponse
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    trancribe.apply_async(
-        args=[file_path, callback_url, custom_id], task_id=custom_id
-    )
+    trancribe.apply_async(args=[file_path, callback_url, custom_id], task_id=custom_id)
     logger.info(f"Task: {custom_id} and backup with same id created")
 
     return ResponseData(status=StatesAPI.success.value, data=f"Task id: {custom_id}")
@@ -150,9 +148,7 @@ def audio_url_input(file_url: str, callback_url: str = None) -> JSONResponse:
             status_code=status.HTTP_409_CONFLICT,
         )
 
-    trancribe.apply_async(
-        args=[file_url, callback_url, custom_id], task_id=custom_id
-    )
+    trancribe.apply_async(args=[file_url, callback_url, custom_id], task_id=custom_id)
     logger.info(f"Task: {custom_id} and backup with same id created")
 
     return ResponseData(status=StatesAPI.success.value, data=f"Task id: {custom_id}")

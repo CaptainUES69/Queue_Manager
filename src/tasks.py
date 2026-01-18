@@ -56,7 +56,7 @@ def load_backups() -> list[str]:
 
     for backup in backups:
         if (
-            backup.task_id in task_statuses 
+            backup.task_id in task_statuses
             and task_statuses[backup.task_id] == StatesTasks.success.value
         ):
             logger.info(f"{backup.task_id} was already executed")
@@ -206,4 +206,3 @@ def init_pipeline_and_tasks(sender=None, **kwargs):
 
     logger.info("Startup backup tasks")
     load_backups()
-    
