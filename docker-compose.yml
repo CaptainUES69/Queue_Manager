@@ -1,0 +1,45 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: quest
+      RABBITMQ_DEFAULT_PASS: quest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+      
+  web:
+    image: queue
+    command: uvicorn src.webserver:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./models:/app/models
+      - sqlite_data:/app
+    ports:
+      - "8000:8000"
+    env_file: '.env'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+  
+  celery_worker:
+    image: queue
+    command: celery -A src.tasks worker --pool=solo --loglevel=INFO
+    volumes:
+      - ./models:/app/models
+      - sqlite_data:/app
+    env_file: '.env'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  sqlite_data:
